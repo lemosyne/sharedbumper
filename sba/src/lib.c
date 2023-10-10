@@ -56,13 +56,17 @@ uint8_t *sba_metadata(struct Sba *self) {
   return self->data - sba_metadata_len();
 }
 
+int sba_lock(struct Sba *self) { return pthread_mutex_lock(&self->lock); }
+
+int sba_unlock(struct Sba *self) { return pthread_mutex_unlock(&self->lock); }
+
 static size_t sba_padding_needed_for(size_t n, size_t align) {
   size_t rounded = (n + align - 1) & ~(align - 1);
   return rounded - n;
 }
 
 uint8_t *sba_alloc(struct Sba *self, size_t n, size_t align) {
-  assert(pthread_mutex_lock(&self->lock) == 0);
+  assert(sba_lock(self) == 0);
 
   size_t padding = sba_padding_needed_for(n, align);
   size_t total = n + padding;
@@ -74,7 +78,7 @@ uint8_t *sba_alloc(struct Sba *self, size_t n, size_t align) {
   void *data = self->data + self->idx + padding;
   self->idx += total;
 
-  assert(pthread_mutex_unlock(&self->lock) == 0);
+  assert(sba_unlock(self) == 0);
 
   return data;
 }
@@ -88,16 +92,51 @@ void sba_dealloc(struct Sba *self, uint8_t *data, size_t n) {
 #ifdef TEST
 #include <stdio.h>
 
-int main(void) {
-  struct Sba allocator = sba_new("test.mem", 128);
+void share_msg(struct Sba *allocator, char *msg) {
+  uint8_t *data = sba_alloc(allocator, strlen(msg) + 1, 2);
 
-  printf("%zu\n", sba_padding_needed_for(9, 4));
+  sba_lock(allocator);
 
-  char *msg = "hello world";
-  char *data = (char *)sba_alloc(&allocator, strlen(msg) + 1, 2);
   memcpy(data, msg, strlen(msg));
   data[strlen(msg)] = '\0';
-  printf("%s\n", data);
+
+  uint64_t buf = (uint64_t)data;
+  uint8_t *metadata = sba_metadata(allocator);
+  memcpy(metadata, &buf, 8);
+
+  sba_unlock(allocator);
+}
+
+char *get_msg(struct Sba *allocator) {
+  sba_lock(allocator);
+
+  uint8_t *metadata = sba_metadata(allocator);
+  uint64_t data;
+  memcpy(&data, metadata, 8);
+
+  sba_unlock(allocator);
+
+  return (char *)data;
+}
+
+int main(void) {
+  char *parent_msg = "hello child";
+  char *child_msg = "hello parent";
+
+  struct Sba allocator = sba_new("test.mem", 4096);
+
+  share_msg(&allocator, parent_msg);
+
+  switch (fork()) {
+  case 0:
+    printf("%s\n", get_msg(&allocator));
+    share_msg(&allocator, child_msg);
+    return 0;
+  default:
+    sleep(1);
+    printf("%s\n", get_msg(&allocator));
+    break;
+  }
 
   sba_drop(&allocator);
   return 0;
