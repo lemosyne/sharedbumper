@@ -19,11 +19,11 @@ struct Sba {
   uint8_t data[];
 };
 
-struct SbaLocal sba_new(const char *path, size_t len);
+struct SbaLocal sba_new(const char *path, size_t len, void *base_addr_req);
 
 void sba_drop(struct SbaLocal *self);
 
-void *sba_metadata(struct SbaLocal *self);
+void **sba_metadata(struct SbaLocal *self);
 
 int sba_lock(struct SbaLocal *self);
 

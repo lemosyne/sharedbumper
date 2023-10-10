@@ -4,7 +4,7 @@ use std::alloc::{GlobalAlloc, Layout};
 pub struct SharedBumpAllocator(SbaLocal);
 
 impl SharedBumpAllocator {
-    pub fn new(path: &str, capacity: usize) -> Self {
+    pub fn new(path: &str, capacity: usize, base_addr_req: *mut ()) -> Self {
         let mut cpath = [0; 4096];
         let path_len = path.as_bytes().len();
 
@@ -15,11 +15,11 @@ impl SharedBumpAllocator {
         cpath[..path_len].copy_from_slice(path.as_bytes());
         cpath[path_len] = 0;
 
-        Self(unsafe { sba_new(cpath.as_ptr() as *mut _, capacity) })
+        Self(unsafe { sba_new(cpath.as_ptr() as *mut _, capacity, base_addr_req as *mut _) })
     }
 
-    pub fn metadata(&self) -> *mut u8 {
-        unsafe { sba_metadata(&self.0 as *const _ as *mut _) as *mut u8 }
+    pub fn metadata(&self) -> *mut *mut u8 {
+        unsafe { sba_metadata(&self.0 as *const _ as *mut _) as *mut _ }
     }
 }
 

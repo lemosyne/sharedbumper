@@ -13,7 +13,7 @@
 
 size_t sba_metadata_len(void) { return sizeof(void *); }
 
-struct SbaLocal sba_new(const char *path, size_t len) {
+struct SbaLocal sba_new(const char *path, size_t len, void *base_addr_req) {
   len += sba_metadata_len();
 
   int fd = shm_open(path, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
@@ -26,9 +26,9 @@ struct SbaLocal sba_new(const char *path, size_t len) {
     err(EXIT_FAILURE, NULL);
   }
 
-  struct Sba *sba = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  struct Sba *sba = mmap(base_addr_req, len, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, 0);
   if (sba == MAP_FAILED) {
-    err(EXIT_FAILURE, NULL);
+    err(EXIT_FAILURE, "mmap");
   }
   sba->cap = len - sizeof(struct Sba);
 
@@ -49,7 +49,7 @@ void sba_drop(struct SbaLocal *self) {
   }
 }
 
-void *sba_metadata(struct SbaLocal *self) {
+void **sba_metadata(struct SbaLocal *self) {
   return &self->sba->metadata;
 }
 
