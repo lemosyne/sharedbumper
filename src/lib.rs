@@ -1,15 +1,21 @@
 use sba::{sba_alloc, sba_dealloc, sba_drop, sba_new, Sba};
-use std::{
-    alloc::{GlobalAlloc, Layout},
-    ffi::CString,
-};
+use std::alloc::{GlobalAlloc, Layout};
 
 pub struct SharedBumpAllocator(Sba);
 
 impl SharedBumpAllocator {
     pub fn new(path: &str, capacity: usize) -> Self {
-        let path = CString::new(path).unwrap();
-        Self(unsafe { sba_new(path.as_ptr(), capacity) })
+        let mut cpath = [0; 4096];
+        let path_len = path.as_bytes().len();
+
+        if path_len >= cpath.len() {
+            panic!("shmem_file path too long");
+        }
+
+        cpath[..path_len].copy_from_slice(path.as_bytes());
+        cpath[path_len] = 0;
+
+        Self(unsafe { sba_new(cpath.as_ptr() as *mut _, capacity) })
     }
 }
 
