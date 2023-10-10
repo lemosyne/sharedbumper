@@ -1,7 +1,9 @@
 #include "lib.h"
 #include <assert.h>
+#include <err.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -11,13 +13,19 @@
 
 struct Sba sba_new(const char *path, size_t cap) {
   int fd = shm_open(path, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
-  assert(fd != -1);
+  if (fd < 0) {
+    err(EXIT_FAILURE, "%s (%zu)", path, cap);
+  }
 
   int res = ftruncate(fd, cap);
-  assert(res == 0);
+  if (res != 0) {
+    err(EXIT_FAILURE, NULL);
+  }
 
   uint8_t *data = mmap(NULL, cap, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-  assert(data != MAP_FAILED);
+  if (data == MAP_FAILED) {
+    err(EXIT_FAILURE, NULL);
+  }
 
   struct Sba self = {
       .lock = PTHREAD_MUTEX_INITIALIZER,
@@ -41,7 +49,7 @@ void sba_drop(struct Sba *self) {
 }
 
 uint8_t *sba_alloc(struct Sba *self, size_t n) {
-  assert(pthread_mutex_lock(&self->lock));
+  assert(pthread_mutex_lock(&self->lock) == 0);
 
   if (self->cap < self->idx + n) {
     return NULL;
