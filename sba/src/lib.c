@@ -1,6 +1,7 @@
 #include "lib.h"
 #include <assert.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -8,7 +9,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-struct SharedBumpAllocator sba_new(const char *path, size_t cap) {
+struct Sba sba_new(const char *path, size_t cap) {
   int fd = shm_open(path, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
   assert(fd != -1);
 
@@ -18,7 +19,7 @@ struct SharedBumpAllocator sba_new(const char *path, size_t cap) {
   uint8_t *data = mmap(NULL, cap, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
   assert(data != MAP_FAILED);
 
-  struct SharedBumpAllocator self = {
+  struct Sba self = {
       .lock = PTHREAD_MUTEX_INITIALIZER,
       .path = strdup(path),
       .fd = fd,
@@ -30,7 +31,7 @@ struct SharedBumpAllocator sba_new(const char *path, size_t cap) {
   return self;
 }
 
-void sba_drop(struct SharedBumpAllocator *self) {
+void sba_drop(struct Sba *self) {
   if (self) {
     assert(pthread_mutex_destroy(&self->lock) == 0);
     assert(munmap(self->data, self->cap) == 0);
@@ -39,17 +40,22 @@ void sba_drop(struct SharedBumpAllocator *self) {
   }
 }
 
-uint8_t *sba_alloc(struct SharedBumpAllocator *self, size_t n) {
+uint8_t *sba_alloc(struct Sba *self, size_t n) {
+  assert(pthread_mutex_lock(&self->lock));
+
   if (self->cap < self->idx + n) {
     return NULL;
   }
 
   void *data = self->data + self->idx;
   self->idx += n;
+
+  assert(pthread_mutex_unlock(&self->lock) == 0);
+
   return data;
 }
 
-void sba_dealloc(struct SharedBumpAllocator *self, uint8_t *data, size_t n) {
+void sba_dealloc(struct Sba *self, uint8_t *data, size_t n) {
   (void)self;
   (void)data;
   (void)n;
@@ -59,7 +65,7 @@ void sba_dealloc(struct SharedBumpAllocator *self, uint8_t *data, size_t n) {
 #include <stdio.h>
 
 int main(void) {
-  struct SharedBumpAllocator allocator = sba_new("test.mem", 128);
+  struct Sba allocator = sba_new("test.mem", 128);
 
   char *msg = "hello world";
   char *data = (char *)sba_alloc(&allocator, strlen(msg) + 1);

@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-struct SharedBumpAllocator {
+struct Sba {
   pthread_mutex_t lock;
   char *path;
   int fd;
@@ -13,10 +13,10 @@ struct SharedBumpAllocator {
   uint8_t *data;
 };
 
-struct SharedBumpAllocator sba_new(const char *path, size_t cap);
+struct Sba sba_new(const char *path, size_t cap);
 
-void sba_drop(struct SharedBumpAllocator *self);
+void sba_drop(struct Sba *self);
 
-uint8_t *sba_alloc(struct SharedBumpAllocator *self, size_t n);
+uint8_t *sba_alloc(struct Sba *self, size_t n);
 
-void sba_dealloc(struct SharedBumpAllocator *self, uint8_t *data, size_t n);
+void sba_dealloc(struct Sba *self, uint8_t *data, size_t n);
