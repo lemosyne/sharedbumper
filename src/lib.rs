@@ -9,7 +9,7 @@ impl SharedBumpAllocator {
         let path_len = path.as_bytes().len();
 
         if path_len >= cpath.len() {
-            panic!("shmem_file path too long");
+            panic!("path too long: {path}");
         }
 
         cpath[..path_len].copy_from_slice(path.as_bytes());
