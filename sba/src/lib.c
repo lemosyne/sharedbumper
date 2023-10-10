@@ -16,7 +16,7 @@ size_t sba_metadata_len(void) { return sizeof(uint8_t *); }
 struct Sba sba_new(const char *path, size_t cap) {
   cap += sba_metadata_len();
 
-  int fd = shm_open(path, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+  int fd = shm_open(path, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
   if (fd < 0) {
     err(EXIT_FAILURE, "%s (%zu)", path, cap);
   }
