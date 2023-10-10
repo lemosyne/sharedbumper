@@ -1,7 +1,7 @@
-use sba::{sba_alloc, sba_dealloc, sba_drop, sba_metadata, sba_new, Sba};
+use sba::{sba_alloc, sba_dealloc, sba_drop, sba_metadata, sba_new, SbaLocal};
 use std::alloc::{GlobalAlloc, Layout};
 
-pub struct SharedBumpAllocator(Sba);
+pub struct SharedBumpAllocator(SbaLocal);
 
 impl SharedBumpAllocator {
     pub fn new(path: &str, capacity: usize) -> Self {
@@ -19,7 +19,7 @@ impl SharedBumpAllocator {
     }
 
     pub fn metadata(&self) -> *mut u8 {
-        unsafe { sba_metadata(&self.0 as *const _ as *mut _) }
+        unsafe { sba_metadata(&self.0 as *const _ as *mut _) as *mut u8 }
     }
 }
 

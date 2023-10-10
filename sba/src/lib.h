@@ -4,25 +4,31 @@
 #include <stddef.h>
 #include <stdint.h>
 
-struct Sba {
-  pthread_mutex_t lock;
+struct SbaLocal {
   char *path;
   int fd;
-  size_t idx;
-  size_t cap;
-  uint8_t *data;
+  size_t len;
+  struct Sba *sba;
 };
 
-struct Sba sba_new(const char *path, size_t cap);
+struct Sba {
+  pthread_mutex_t lock;
+  void *metadata;
+  size_t cap;
+  size_t idx;
+  uint8_t data[];
+};
 
-void sba_drop(struct Sba *self);
+struct SbaLocal sba_new(const char *path, size_t len);
 
-uint8_t *sba_metadata(struct Sba *self);
+void sba_drop(struct SbaLocal *self);
 
-int sba_lock(struct Sba *self);
+void *sba_metadata(struct SbaLocal *self);
 
-int sba_unlock(struct Sba *self);
+int sba_lock(struct SbaLocal *self);
 
-uint8_t *sba_alloc(struct Sba *self, size_t n, size_t align);
+int sba_unlock(struct SbaLocal *self);
 
-void sba_dealloc(struct Sba *self, uint8_t *data, size_t n);
+uint8_t *sba_alloc(struct SbaLocal *self, size_t n, size_t align);
+
+void sba_dealloc(struct SbaLocal *self, uint8_t *data, size_t n);

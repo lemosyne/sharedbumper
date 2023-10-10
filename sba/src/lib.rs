@@ -4,5 +4,5 @@
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
-unsafe impl Sync for Sba {}
-unsafe impl Send for Sba {}
+unsafe impl Sync for SbaLocal {}
+unsafe impl Send for SbaLocal {}
