@@ -11,8 +11,9 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-size_t sba_metadata_len(void) { return sizeof(void *); }
+size_t sba_metadata_len(void) { return sizeof(struct Sba); }
 
+// TODO: races etc.
 struct SbaLocal sba_new(const char *path, size_t len, void *base_addr_req) {
   len += sba_metadata_len();
 
@@ -26,7 +27,7 @@ struct SbaLocal sba_new(const char *path, size_t len, void *base_addr_req) {
     err(EXIT_FAILURE, NULL);
   }
 
-  struct Sba *sba = mmap(base_addr_req, len, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, 0);
+  struct Sba *sba = mmap(base_addr_req, len, PROT_READ | PROT_WRITE, MAP_SHARED_VALIDATE | MAP_FIXED, fd, 0);
   if (sba == MAP_FAILED) {
     err(EXIT_FAILURE, "mmap");
   }
@@ -42,6 +43,7 @@ struct SbaLocal sba_new(const char *path, size_t len, void *base_addr_req) {
   return self;
 }
 
+// TODO: races
 void sba_drop(struct SbaLocal *self) {
   if (self) {
     assert(munmap(self->sba, self->len) == 0);
@@ -57,83 +59,60 @@ int sba_lock(struct SbaLocal *self) { return pthread_mutex_lock(&self->sba->lock
 
 int sba_unlock(struct SbaLocal *self) { return pthread_mutex_unlock(&self->sba->lock); }
 
-uint8_t *sba_alloc(struct SbaLocal *self, size_t n, size_t align) {
+uint8_t *sba_alloc(struct SbaLocal *self, size_t size, size_t align) {
   assert(sba_lock(self) == 0);
-
   struct Sba *sba = self->sba;
 
-  size_t correction = (align - (size_t)(sba->data + sba->idx) % align) % align;
-  size_t total = n + correction;
+  // Attempt to use simple alloc:
+  uint8_t *sac = sa_alloc(&sba->sa, size, align);
+  if (sac) {
+    assert(sba_unlock(self) == 0);
+    return sac;
+  }
 
-  if (sba->cap < sba->idx + total) {
+  // Otherwise, bump allocate:
+  size_t correction = (align - (size_t)(sba->data + sba->idx) % align) % align;
+  size_t next_idx = sba->idx + size + correction;
+
+  if (sba->cap < next_idx) {
     assert(sba_unlock(self) == 0);
     return NULL;
   }
 
   void *data = sba->data + sba->idx + correction;
-  sba->idx += total;
+  sba->idx = next_idx;
 
   assert(sba_unlock(self) == 0);
 
   return data;
 }
 
-void sba_dealloc(struct SbaLocal *self, uint8_t *data, size_t n) {
-  (void)self;
-  (void)data;
-  (void)n;
+bool sba_extend(struct SbaLocal *self, uint8_t *chunk, size_t old_size, size_t new_size) {
+  struct Sba *sba = self->sba;
+
+  // If this is a sa chunk, we cannot extend it
+  if (is_sa_chunk(&sba->sa, chunk))
+    return false;
+
+  // Extend the chunk if it is adjacent to the top chunk
+  assert(new_size >= old_size);
+  assert(sba_lock(self) == 0);
+
+  if (sba->data + sba->idx == chunk + old_size) {
+    sba->idx += new_size - old_size;
+
+    assert(sba_unlock(self) == 0);
+    return true;
+  }
+
+  assert(sba_unlock(self) == 0);
+  return false;
 }
 
-// #ifdef TEST
-// #include <stdio.h>
+void sba_dealloc(struct SbaLocal *self, uint8_t *chunk, size_t size) {
+  assert(sba_lock(self) == 0);
+  sa_dealloc(&self->sba->sa, chunk);
+  assert(sba_unlock(self) == 0);
 
-// void share_msg(struct Sba *allocator, char *msg) {
-//   uint8_t *data = sba_alloc(allocator, strlen(msg) + 1, 2);
-
-//   sba_lock(allocator);
-
-//   memcpy(data, msg, strlen(msg));
-//   data[strlen(msg)] = '\0';
-
-//   uint64_t buf = (uint64_t)data;
-//   uint8_t *metadata = sba_metadata(allocator);
-//   memcpy(metadata, &buf, 8);
-
-//   sba_unlock(allocator);
-// }
-
-// char *get_msg(struct Sba *allocator) {
-//   sba_lock(allocator);
-
-//   uint8_t *metadata = sba_metadata(allocator);
-//   uint64_t data;
-//   memcpy(&data, metadata, 8);
-
-//   sba_unlock(allocator);
-
-//   return (char *)data;
-// }
-
-// int main(void) {
-//   char *parent_msg = "hello child";
-//   char *child_msg = "hello parent";
-
-//   struct Sba allocator = sba_new("test.mem", 4096);
-
-//   share_msg(&allocator, parent_msg);
-
-//   switch (fork()) {
-//   case 0:
-//     printf("%s\n", get_msg(&allocator));
-//     share_msg(&allocator, child_msg);
-//     return 0;
-//   default:
-//     sleep(1);
-//     printf("%s\n", get_msg(&allocator));
-//     break;
-//   }
-
-//   sba_drop(&allocator);
-//   return 0;
-// }
-// #endif
+  (void) size;
+}
