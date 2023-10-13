@@ -1,5 +1,5 @@
 use sba::*;
-use std::alloc::{GlobalAlloc, Layout};
+use std::{alloc::{GlobalAlloc, Layout}, sync::atomic::AtomicUsize};
 
 pub struct SharedBumpAllocator(SbaLocal);
 
@@ -61,5 +61,42 @@ unsafe impl GlobalAlloc for SharedBumpAllocator {
 impl Drop for SharedBumpAllocator {
     fn drop(&mut self) {
         unsafe { sba_drop(&mut self.0 as *mut _) }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::ptr;
+
+    use super::*;
+
+    #[test]
+    fn alloc_dealloc() {
+        unsafe {
+            let _ = std::fs::remove_file("/dev/shm/test.psm");
+            let alloc = SharedBumpAllocator::new("test.psm", 0x10_000_000, ptr::null_mut());
+
+            let mut ptrs = [ptr::null_mut(); 1000];
+            let mut layouts = [Layout::new::<()>(); 1000];
+            for i in 1..100 {
+                layouts[i] = Layout::from_size_align(i * 0x117, 1).unwrap();
+                ptrs[i] = alloc.alloc(layouts[i]);
+                
+                std::slice::from_raw_parts_mut(ptrs[i], layouts[i].size()).fill(b'A');
+            }
+
+            for i in (1..100).step_by(3) {
+                alloc.dealloc(ptrs[i], layouts[i]);
+            }
+
+            for i in (1..50).rev() {
+                ptrs[i] = alloc.alloc(layouts[i]);
+                std::slice::from_raw_parts_mut(ptrs[i], layouts[i].size()).fill(b'B');
+            }
+
+            for i in 1..100 {
+                alloc.dealloc(ptrs[i], layouts[i]);
+            }
+        }
     }
 }

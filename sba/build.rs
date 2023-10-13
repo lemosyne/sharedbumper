@@ -1,6 +1,6 @@
 use std::{env, path::PathBuf};
 
-const TARGET_FILES: &[&str] = &["lib.c", "lib.h", "sa.c", "sa.h"];
+const TARGET_FILES: &[&str] = &["lib.c", "lib.h"];
 
 fn main() {
     for file in TARGET_FILES {
@@ -10,7 +10,6 @@ fn main() {
     let outdir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let outfile = outdir.join("bindings.rs");
 
-    cc::Build::new().file("./src/sa.c").compile("qa");
     cc::Build::new().file("./src/lib.c").compile("sba");
 
     let bindings = bindgen::Builder::default()
