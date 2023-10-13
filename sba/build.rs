@@ -13,7 +13,7 @@ fn main() {
     cc::Build::new().file("./src/lib.c").compile("sba");
 
     let bindings = bindgen::Builder::default()
-        .clang_args(["-pthread", "-lrt"])
+        .clang_args(["-pthread", "-lrt", "-O3"])
         .header("./src/lib.h")
         .derive_default(true)
         .generate()

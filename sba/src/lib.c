@@ -12,11 +12,11 @@
 #include <unistd.h>
 #include <stdio.h>
 
-#define SMALL_SIZE 0x100
 #define MIN_SIZE (sizeof(struct FreeChunk) < 0x40 ? 0x40 : sizeof(struct FreeChunk))
 #define DEFAULT_ALIGN 1
 
 static int log;
+static int count = 0;
 
 // TODO: races etc.
 struct SbaLocal sba_new(const char *path, size_t len, void *base_addr_req) {
@@ -103,17 +103,57 @@ struct FreeChunk *chunk_after(struct FreeChunk *chunk) {
   return (struct FreeChunk *) ((uint8_t *) chunk + chunk->header.size);
 }
 
+struct FreeChunk *chunk_before(struct FreeChunk *chunk) {
+  return (struct FreeChunk *) ((uint8_t *) chunk - chunk->header.prev_size);
+}
+
+void unlink_chunk(struct FreeChunk **freelist, struct FreeChunk *chunk) {
+  if (chunk->next) chunk->next->prev = chunk->prev;
+  if (chunk->prev) chunk->prev->next = chunk->next;
+  else *freelist = chunk->next;
+}
+
 struct FreeChunk *alloc_from_freelist(struct FreeChunk **freelist, size_t size) {
   struct FreeChunk *head = *freelist;
 
-  // Check if the head is big enough
-  if (!head || head->header.size < size) return NULL;
+  while (head) {
+    // Check if the head is big enough
+    if (head->header.size >= size) break;
+  
+    // Otherwise keep searching
+    head = head->next;
+  }
 
-  // Link the freelist correctly
-  *freelist = head->next;
+  if (!head) return NULL;
 
-  if (head->next) head->next->prev = head->prev;
-  if (head->prev) head->prev->next = head->next;
+  // If the chunk is much bigger than we need, only allocate part of it
+  if (head->header.size >= size + MIN_SIZE * 2) {
+    struct FreeChunk *after = chunk_after(head);
+  
+    size_t old_size = head->header.size;
+    head->header.size = size;
+    
+    struct FreeChunk *new_free = chunk_after(head);
+    *new_free = (struct FreeChunk) {
+      .header = (struct FreeChunkHeader) {
+        .inuse = false,
+        .prev_size = size,
+        .size = old_size - size,
+      },
+      .next = head->next,
+      .prev = head->prev,
+    };
+
+    if (new_free->next) new_free->next->prev = new_free;
+    if (new_free->prev) new_free->prev->next = new_free;
+    else *freelist = new_free;
+
+    after->header.prev_size = new_free->header.size;
+  } else {
+    // Otherwise, remove it entirely from the freelist
+    unlink_chunk(freelist, head);
+    count--;
+  }
 
   // Mark the chunk as allocated and return
   head->header.inuse = true;
@@ -148,12 +188,8 @@ uint8_t *sba_alloc(struct SbaLocal *self, size_t size, size_t align) {
   // All chunks will be of at least the minimum size 
   if (size < MIN_SIZE) size = MIN_SIZE;
 
-  // Try to allocate off of the small bin
-  chunk = alloc_from_freelist(&sba->small_bin, size);
-  if (chunk) goto return_chunk;
-
-  // Otherwise, try to allocate off of the large bin
-  chunk = alloc_from_freelist(&sba->large_bin, size);
+  // Try to allocate off of the unsorted bin
+  chunk = alloc_from_freelist(&sba->unsorted_bin, size);
   if (chunk) goto return_chunk;
 
   // If our freelists do not provide, we allocate from the top chunk
@@ -188,7 +224,7 @@ return_chunk:
 
 cleanup:
   assert(sba_unlock(self) == 0);
-  // dprintf(log, "A(%p, 0x%lx, 0x%lx)\n", user, size, align);
+  // fprintf(stderr, "A(%p, 0x%lx, 0x%lx)\n", user, size, align);
   // fsync(log);
   return user;
 }
@@ -207,9 +243,22 @@ void sba_dealloc(struct SbaLocal *self, uint8_t *user_chunk, size_t size) {
 
   struct FreeChunk *free = *(FreeChunkTrailer *) (user_chunk + size);
   struct FreeChunk *after = chunk_after(free);
+  struct FreeChunk *before = chunk_before(free);
+
+  // If the chunk before is free, consolodiate
+  if ((uint8_t *) before != sba->data && !before->header.inuse) {
+    before->header.size += free->header.size;
+    after->header.prev_size = before->header.size;
+    free = before;
+  }
 
   // If the top chunk is the chunk after, consolidate
   if (after == sba->top) {
+    if (!free->header.inuse) {
+      unlink_chunk(&sba->unsorted_bin, free);
+      count--;
+    }
+
     free->header.size += after->header.size;
     free->header.inuse = false;
     free->next = NULL;
@@ -221,25 +270,22 @@ void sba_dealloc(struct SbaLocal *self, uint8_t *user_chunk, size_t size) {
 
   // If the chunk after is free, consolidate
   if (!after->header.inuse) {
-    if (after->next) after->next->prev = after->prev;
-    if (after->prev) after->prev->next = after->next;
-    else if (after->header.size <= SMALL_SIZE) sba->small_bin = after->next;
-    else sba->large_bin = after->next;
-
+    unlink_chunk(&sba->unsorted_bin, after);
+    count--;
+  
     free->header.size += after->header.size;
+    chunk_after(after)->header.prev_size = free->header.size;
   }
 
-  // If the chunk is small, add it to the small bin
-  if (free->header.size <= SMALL_SIZE) {
-    dealloc_to_freelist(&sba->small_bin, free); 
-    goto cleanup;
+  // Then, if it wasn't already on a freelist, add it to the unsorted bin
+  if (free->header.inuse) {
+    count++;
+    dealloc_to_freelist(&sba->unsorted_bin, free);
+    // fprintf(stderr, "Added 0x%lx, Unsorted count %lu\n", free->header.size, count);
   }
-
-  // Otherwise, add it to the large bin
-  dealloc_to_freelist(&sba->large_bin, free);
 
 cleanup:
-  // dprintf(log, "D(%p, 0x%lx)\n", user_chunk, size);
+  // fprintf(stderr, "D(%p, 0x%lx)\n", user_chunk, size);
   // fsync(log);
 
   if (free->next) assert(free == free->next->prev);

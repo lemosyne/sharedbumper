@@ -19,9 +19,8 @@ struct Sba {
   void *metadata;
 
   struct FreeChunk *top;
-
-  struct FreeChunk *small_bin;
-  struct FreeChunk *large_bin;
+  
+  struct FreeChunk *unsorted_bin;
 
   uint8_t data[];
 };
