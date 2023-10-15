@@ -1,5 +1,5 @@
 use sba::*;
-use std::{alloc::{GlobalAlloc, Layout}, sync::atomic::AtomicUsize};
+use std::alloc::{GlobalAlloc, Layout};
 
 pub struct SharedBumpAllocator(SbaLocal);
 

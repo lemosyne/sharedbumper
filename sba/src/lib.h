@@ -5,6 +5,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define SMALLBIN_INCREMENT 0x10
+#define SMALLBIN_MAXSIZE 0x1000
+
 struct SbaLocal {
   char *path;
   int fd;
@@ -20,12 +23,14 @@ struct Sba {
 
   struct FreeChunk *top;
   
+  struct FreeChunk *small_bins[SMALLBIN_MAXSIZE / SMALLBIN_INCREMENT];
   struct FreeChunk *unsorted_bin;
 
   uint8_t data[];
 };
 
 struct FreeChunkHeader {
+  bool unsorted;
   bool inuse;
   size_t prev_size;
   size_t size;
