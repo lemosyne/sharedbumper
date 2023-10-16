@@ -23,7 +23,7 @@ struct Sba {
 
   struct FreeChunk *top;
   
-  struct FreeChunk *small_bins[SMALLBIN_MAXSIZE / SMALLBIN_INCREMENT];
+  struct FreeChunk *small_bins[SMALLBIN_MAXSIZE / SMALLBIN_INCREMENT + 1];
   struct FreeChunk *unsorted_bin;
 
   uint8_t data[];

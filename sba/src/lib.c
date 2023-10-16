@@ -339,9 +339,9 @@ void sba_dealloc(struct SbaLocal *self, uint8_t *user_chunk, size_t user_size) {
 
   // Free it onto the smallbins if possible
   if (free->header.size <= SMALLBIN_MAXSIZE) {
-    free->header.unsorted = false;
-  
     size_t index = smallbin_index_floor(free->header.size);
+  
+    free->header.unsorted = false;
     dealloc_to_freelist(&sba->small_bins[index], free);
     goto cleanup;
   }
