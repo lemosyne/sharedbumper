@@ -5,7 +5,7 @@ use std::{
     collections::HashMap,
 };
 
-static STATE: Lazy<SharedBumpAllocator> = Lazy::new(|| SharedBumpAllocator::new("test.psm", 4096));
+static STATE: Lazy<SharedBumpAllocator> = Lazy::new(|| SharedBumpAllocator::new("test.psm", 4096, std::ptr::null_mut()));
 
 pub struct GlobalSharedBumpAllocator;
 
