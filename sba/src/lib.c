@@ -51,9 +51,16 @@ struct SbaLocal sba_new(const char *path, size_t len, void *base_addr_req) {
 
   // Initialize the allocator if we are the first to use it
   // TODO: this races
-  if (sba->initialized) return self;
-  sba->initialized = true;
-  
+  if (*((volatile bool *) &sba->initialized)) return self;
+  *((volatile bool *) &sba->initialized) = true;
+
+  pthread_mutexattr_t attr;
+  pthread_mutexattr_init(&attr);
+  pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+  if (pthread_mutex_init(&sba->lock, &attr) != 0) {
+    err(EXIT_FAILURE, "pthread mutex init");
+  }
+
   sba->top = (struct FreeChunk *) sba->data;
   *sba->top = (struct FreeChunk) {
     .header = (struct FreeChunkHeader) {
@@ -134,7 +141,7 @@ struct FreeChunk *alloc_from_freelist_unsorted(struct Sba *sba, size_t size) {
   while (head) {
     // Check if the head is big enough
     if (head->header.size >= size) break;
-  
+
     // Otherwise keep searching
     head = head->next;
   }
@@ -144,10 +151,10 @@ struct FreeChunk *alloc_from_freelist_unsorted(struct Sba *sba, size_t size) {
   // If the chunk is much bigger than we need, only allocate part of it
   if (head->header.size >= size + MIN_SIZE * 2) {
     struct FreeChunk *after = chunk_after(head);
-  
+
     size_t old_size = head->header.size;
     head->header.size = size;
-    
+
     struct FreeChunk *new_free = chunk_after(head);
     *new_free = (struct FreeChunk) {
       .header = (struct FreeChunkHeader) {
@@ -200,7 +207,7 @@ uint8_t *sba_alloc(struct SbaLocal *self, size_t size, size_t align) {
   if (DEFAULT_ALIGN % align != 0) size += align;
   size += sizeof(struct FreeChunkHeader) + sizeof(FreeChunkTrailer);
 
-  // All chunks will be of at least the minimum size 
+  // All chunks will be of at least the minimum size
   if (size < MIN_SIZE) size = MIN_SIZE;
 
   // Try to allocate off of the small bins
@@ -232,7 +239,7 @@ uint8_t *sba_alloc(struct SbaLocal *self, size_t size, size_t align) {
 return_chunk:
   if (!chunk) goto cleanup;
 
-  // Compensate for alignment by adding the trailer 
+  // Compensate for alignment by adding the trailer
   // and shifting the returned pointer correctly
   user = free_to_user(chunk);
 
@@ -268,11 +275,11 @@ bool sba_extend(struct SbaLocal *self, uint8_t *user_chunk, size_t old_size, siz
     goto cleanup;
   }
 
-  // Extend into the top chunk if we can 
+  // Extend into the top chunk if we can
   struct FreeChunk *after = chunk_after(chunk);
   if (after == sba->top) {
     size_t required = new_size - chunk->header.size;
-  
+
     sba->top -= required;
     chunk->header.size = new_size;
 
@@ -285,7 +292,7 @@ bool sba_extend(struct SbaLocal *self, uint8_t *user_chunk, size_t old_size, siz
   // If the next chunk is free, extend into it
   if (!after->header.inuse && after->header.unsorted && new_size <= after->header.size + chunk->header.size) {
     unlink_chunk(&sba->unsorted_bin, after);
-  
+
     chunk->header.size += after->header.size;
     chunk_after(after)->header.prev_size = chunk->header.size;
 
@@ -329,7 +336,7 @@ void sba_dealloc(struct SbaLocal *self, uint8_t *user_chunk, size_t user_size) {
   // If the chunk after is free, consolidate
   if (!after->header.inuse && after->header.unsorted) {
     unlink_chunk(&sba->unsorted_bin, after);
-  
+
     free->header.size += after->header.size;
     chunk_after(after)->header.prev_size = free->header.size;
   }
@@ -340,7 +347,7 @@ void sba_dealloc(struct SbaLocal *self, uint8_t *user_chunk, size_t user_size) {
   // Free it onto the smallbins if possible
   if (free->header.size <= SMALLBIN_MAXSIZE) {
     size_t index = smallbin_index_floor(free->header.size);
-  
+
     free->header.unsorted = false;
     dealloc_to_freelist(&sba->small_bins[index], free);
     goto cleanup;
